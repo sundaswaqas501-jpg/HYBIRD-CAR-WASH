@@ -29,18 +29,17 @@ DARK = HexColor("#222222")
 
 # Register Arabic font
 ARABIC_FONT_NAME = "ArabicKufi"
-ARABIC_FONT_PATH = "NotoKufiArabic-Regular.ttf"
+ARABIC_FONT_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "NotoKufiArabic-Regular.ttf"
+)
 
 if os.path.exists(ARABIC_FONT_PATH):
-    try:
-        pdfmetrics.registerFont(
-            TTFont(ARABIC_FONT_NAME, ARABIC_FONT_PATH)
-        )
-    except Exception:
-        pass
+    pdfmetrics.registerFont(
+        TTFont(ARABIC_FONT_NAME, ARABIC_FONT_PATH)
+    )
 
 def contains_arabic(text):
-    """Check whether text contains Arabic characters."""
     return any(
         "\u0600" <= char <= "\u06FF"
         or "\u0750" <= char <= "\u077F"
@@ -48,30 +47,46 @@ def contains_arabic(text):
         for char in str(text)
     )
 
-def shape_arabic(text):
-    """Shape Arabic letters and apply right-to-left display order."""
-    if contains_arabic(text):
-        return get_display(arabic_reshaper.reshape(str(text)))
-    return str(text)
+def shape_text(text):
+    """Shape Arabic letters and arrange them right-to-left."""
+    text = str(text)
 
-def draw_wrapped_text(
-    pdf, text, x, y, max_width, font_name, font_size,
-    line_height, bottom_limit, right_to_left=False
-):
-    """Draw wrapped text without overflowing the coupon panel."""
-    words = str(text).split()
-    if not words:
-        return y
+    if contains_arabic(text):
+        return get_display(arabic_reshaper.reshape(text))
+
+    return text
+
+def draw_terms(pdf, text, x, y, max_width, bottom_limit):
+    """Draw Arabic terms right-aligned, with automatic wrapping."""
+    text = str(text or "No additional terms.")
+
+    is_arabic = contains_arabic(text)
+
+    if is_arabic:
+        if ARABIC_FONT_NAME not in pdfmetrics.getRegisteredFontNames():
+            raise RuntimeError(
+                "Arabic font file NotoKufiArabic-Regular.ttf "
+                "is missing from the repository."
+            )
+        font_name = ARABIC_FONT_NAME
+    else:
+        font_name = "Helvetica"
+
+    font_size = 8
+    line_height = 12
 
     pdf.setFont(font_name, font_size)
+
+    words = text.split()
     lines = []
     current_line = ""
 
     for word in words:
         test_line = (current_line + " " + word).strip()
-        display_line = shape_arabic(test_line)
+        displayed = shape_text(test_line)
+
         width = pdfmetrics.stringWidth(
-            display_line, font_name, font_size
+            displayed, font_name, font_size
         )
 
         if width <= max_width:
@@ -88,22 +103,18 @@ def draw_wrapped_text(
         if y < bottom_limit:
             break
 
-        display_line = shape_arabic(line)
+        displayed = shape_text(line)
 
-        if right_to_left:
-            pdf.drawRightString(x + max_width, y, display_line)
+        if is_arabic:
+            pdf.drawRightString(x + max_width, y, displayed)
         else:
-            pdf.drawString(x, y, display_line)
+            pdf.drawString(x, y, displayed)
 
         y -= line_height
 
-    return y
-
 st.markdown("""
 <style>
-.stApp {
-    background: #f5f8fc;
-}
+.stApp { background: #f5f8fc; }
 .block-container {
     max-width: 900px;
     padding-top: 1.5rem;
@@ -143,9 +154,7 @@ logo_path = next(
 if logo_path:
     st.image(logo_path, use_container_width=True)
 else:
-    st.warning(
-        "Logo not found. Put logo.jpeg in the same folder as app.py."
-    )
+    st.warning("Logo not found. Put logo.jpeg in the same folder as app.py.")
 
 st.caption(
     "Create a customer coupon, preview it, and download it as a PDF."
@@ -202,10 +211,7 @@ with st.form("coupon_form"):
 
     terms = st.text_area(
         "Terms & Conditions",
-        value=(
-            "Valid for the named customer and vehicle. "
-            "One-time use only. Cannot be combined with other offers."
-        ),
+        value="یہ کوپن صرف متعلقہ کسٹمر اور گاڑی کے لیے ہے۔ یہ صرف ایک بار استعمال کیا جا سکتا ہے۔ دوسری آفرز کے ساتھ استعمال نہیں ہو سکتا۔",
         height=90
     )
 
@@ -235,10 +241,7 @@ if submitted or "coupon_data" not in st.session_state:
         ),
         "terms": (
             terms.strip() if submitted
-            else (
-                "Valid for the named customer and vehicle. "
-                "One-time use only. Cannot be combined with other offers."
-            )
+            else "یہ کوپن صرف متعلقہ کسٹمر اور گاڑی کے لیے ہے۔ یہ صرف ایک بار استعمال کیا جا سکتا ہے۔ دوسری آفرز کے ساتھ استعمال نہیں ہو سکتا۔"
         ),
         "lucky_draw_text": (
             lucky_draw_text.strip() if submitted
@@ -277,23 +280,15 @@ if logo_path:
         logo_data_uri = ""
 
 st.markdown(f"""
-<div style="background:white;border:3px solid #e7b943;
-border-radius:18px;padding:22px;color:#222;">
+<div style="background:white;border:3px solid #e7b943;border-radius:18px;padding:22px;color:#222;">
   <div style="text-align:center;margin-bottom:12px;">
-    {
-        f'<img src="{logo_data_uri}" style="width:100%;max-width:480px;max-height:150px;object-fit:contain;border-radius:8px;" />'
-        if logo_data_uri else
-        '<div style="background:#0758a5;color:white;border-radius:12px;padding:15px;font-size:24px;font-weight:800;">HYBRID CAR SERVICES</div>'
-    }
+    {f'<img src="{logo_data_uri}" style="width:100%;max-width:480px;max-height:150px;object-fit:contain;border-radius:8px;" />' if logo_data_uri else '<div style="background:#0758a5;color:white;border-radius:12px;padding:15px;font-size:24px;font-weight:800;">HYBRID CAR SERVICES</div>'}
   </div>
-  <div style="background:#0758a5;color:white;border-radius:12px;
-  padding:12px;text-align:center;">
+  <div style="background:#0758a5;color:white;border-radius:12px;padding:12px;text-align:center;">
     <div style="font-size:13px;">EXCLUSIVE CUSTOMER DISCOUNT COUPON</div>
   </div>
-  <div style="font-size:36px;font-weight:900;color:#0758a5;
-  text-align:center;margin-top:18px;">{esc(data['discount_text'])}</div>
-  <div style="font-size:17px;font-weight:700;color:#0758a5;
-  text-align:center;">{esc(services_text)}</div>
+  <div style="font-size:36px;font-weight:900;color:#0758a5;text-align:center;margin-top:18px;">{esc(data['discount_text'])}</div>
+  <div style="font-size:17px;font-weight:700;color:#0758a5;text-align:center;">{esc(services_text)}</div>
   <hr style="border:1px solid #e7b943;">
   <div style="line-height:2;">
     <b>{esc(data['lucky_draw_text'])}</b><br>
@@ -312,20 +307,14 @@ def create_pdf(coupon, image_file):
     pdf = canvas.Canvas(buffer, pagesize=A4)
     page_width, page_height = A4
 
-    # Original background and border
     pdf.setFillColor(PALE_BLUE)
-    pdf.rect(
-        0, 0, page_width, page_height,
-        fill=1, stroke=0
-    )
+    pdf.rect(0, 0, page_width, page_height, fill=1, stroke=0)
 
     pdf.setStrokeColor(GOLD)
     pdf.setLineWidth(4)
     pdf.roundRect(
-        28, 28,
-        page_width - 56,
-        page_height - 56,
-        18, fill=0, stroke=1
+        28, 28, page_width - 56,
+        page_height - 56, 18, fill=0, stroke=1
     )
 
     # Original logo placement
@@ -422,7 +411,7 @@ def create_pdf(coupon, image_file):
 
         y -= 25
 
-    # Terms heading remains in the original position
+    # Terms heading: same position and style as original
     y -= 5
     pdf.setFillColor(HexColor("#555555"))
     pdf.setFont("Helvetica-Bold", 9)
@@ -431,32 +420,17 @@ def create_pdf(coupon, image_file):
         y,
         "Terms & Conditions:"
     )
+
     y -= 16
 
-    terms_text = coupon["terms"] or "No additional terms."
-    font_name = "Helvetica"
-    right_to_left = contains_arabic(terms_text)
-
-    # Use Arabic font only when Arabic text is present
-    if right_to_left:
-        if ARABIC_FONT_NAME not in pdfmetrics.getRegisteredFontNames():
-            raise RuntimeError(
-                "Arabic font missing. Add "
-                "NotoKufiArabic-Regular.ttf to the repository."
-            )
-        font_name = ARABIC_FONT_NAME
-
-    draw_wrapped_text(
+    # Correct Arabic shaping, RTL direction and wrapping
+    draw_terms(
         pdf=pdf,
-        text=terms_text,
+        text=coupon["terms"],
         x=panel_x + 20,
         y=y,
         max_width=panel_w - 40,
-        font_name=font_name,
-        font_size=8,
-        line_height=12,
-        bottom_limit=panel_y + 15,
-        right_to_left=right_to_left
+        bottom_limit=panel_y + 15
     )
 
     # Original footer
