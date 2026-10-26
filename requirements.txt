@@ -1,6 +1,5 @@
-
-
-
 streamlit
 pillow
 reportlab
+arabic-reshaper
+python-bidi
