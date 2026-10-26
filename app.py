@@ -1,4 +1,3 @@
-
 import os
 import base64
 from io import BytesIO
@@ -28,16 +27,19 @@ GOLD = HexColor("#E7B943")
 DARK = HexColor("#222222")
 
 # Register Arabic font
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ARABIC_FONT_NAME = "ArabicKufi"
-ARABIC_FONT_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
-    "NotoKufiArabic-Regular.ttf"
-)
+ARABIC_FONT_CANDIDATES = [
+    os.path.join(BASE_DIR, "Amiri-Regular.ttf"),
+    os.path.join(BASE_DIR, "NotoKufiArabic-Regular.ttf"),
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+]
 
-if os.path.exists(ARABIC_FONT_PATH):
-    pdfmetrics.registerFont(
-        TTFont(ARABIC_FONT_NAME, ARABIC_FONT_PATH)
-    )
+for _font_path in ARABIC_FONT_CANDIDATES:
+    if os.path.exists(_font_path):
+        pdfmetrics.registerFont(TTFont(ARABIC_FONT_NAME, _font_path))
+        break
+
 
 def contains_arabic(text):
     return any(
@@ -46,6 +48,7 @@ def contains_arabic(text):
         or "\u08A0" <= char <= "\u08FF"
         for char in str(text)
     )
+
 
 def shape_text(text):
     """Shape Arabic letters and arrange them right-to-left."""
@@ -56,6 +59,7 @@ def shape_text(text):
 
     return text
 
+
 def draw_terms(pdf, text, x, y, max_width, bottom_limit):
     """Draw Arabic terms right-aligned, with automatic wrapping."""
     text = str(text or "No additional terms.")
@@ -65,7 +69,7 @@ def draw_terms(pdf, text, x, y, max_width, bottom_limit):
     if is_arabic:
         if ARABIC_FONT_NAME not in pdfmetrics.getRegisteredFontNames():
             raise RuntimeError(
-                "Arabic font file NotoKufiArabic-Regular.ttf "
+                "Arabic font file Amiri-Regular.ttf "
                 "is missing from the repository."
             )
         font_name = ARABIC_FONT_NAME
@@ -111,6 +115,7 @@ def draw_terms(pdf, text, x, y, max_width, bottom_limit):
             pdf.drawString(x, y, displayed)
 
         y -= line_height
+
 
 st.markdown("""
 <style>
@@ -252,6 +257,7 @@ if submitted or "coupon_data" not in st.session_state:
 data = st.session_state["coupon_data"]
 services_text = ", ".join(data["eligible_services"]) or "None selected"
 
+
 def esc(value):
     return (
         str(value)
@@ -259,6 +265,7 @@ def esc(value):
         .replace("<", "&lt;")
         .replace(">", "&gt;")
     )
+
 
 st.divider()
 st.subheader("Coupon Preview")
@@ -301,6 +308,7 @@ st.markdown(f"""
   </div>
 </div>
 """, unsafe_allow_html=True)
+
 
 def create_pdf(coupon, image_file):
     buffer = BytesIO()
@@ -445,6 +453,7 @@ def create_pdf(coupon, image_file):
     pdf.save()
     buffer.seek(0)
     return buffer.getvalue()
+
 
 pdf_bytes = create_pdf(data, logo_path)
 
