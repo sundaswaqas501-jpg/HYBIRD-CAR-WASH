@@ -8,6 +8,15 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.colors import HexColor, white
 from reportlab.lib.utils import ImageReader
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+
+try:
+    import arabic_reshaper
+    from bidi.algorithm import get_display
+    ARABIC_SHAPING_AVAILABLE = True
+except ImportError:
+    ARABIC_SHAPING_AVAILABLE = False
 
 st.set_page_config(page_title="Hybrid Car Services Coupon", page_icon="🚘", layout="centered")
 
@@ -16,6 +25,23 @@ DARK_BLUE = HexColor("#073B8C")
 PALE_BLUE = HexColor("#E8F4FF")
 GOLD = HexColor("#E7B943")
 DARK = HexColor("#222222")
+ARABIC_FONT_PATH = "NotoKufiArabic-Regular.ttf"
+ARABIC_FONT_REGISTERED = False
+if os.path.exists(ARABIC_FONT_PATH):
+    try:
+        pdfmetrics.registerFont(TTFont("ArabicFont", ARABIC_FONT_PATH))
+        ARABIC_FONT_REGISTERED = True
+    except Exception:
+        ARABIC_FONT_REGISTERED = False
+
+def contains_arabic(text):
+    return any("\u0600" <= ch <= "\u06ff" or "\u0750" <= ch <= "\u077f" for ch in str(text))
+
+def prepare_arabic(text):
+    text = str(text)
+    if contains_arabic(text) and ARABIC_SHAPING_AVAILABLE:
+        return get_display(arabic_reshaper.reshape(text))
+    return text
 
 st.markdown("""
 <style>
@@ -54,9 +80,10 @@ with st.form("coupon_form"):
         default=["CAR WASH", "OIL CHANGE"],
     )
     terms = st.text_area(
-        "Terms & Conditions",
-        value="Valid for the named customer and vehicle. One-time use only. Cannot be combined with other offers.",
-        height=90,
+        "Terms & Conditions (Arabic or English — editable)",
+        value="صالحة للعميل والمركبة المذكورين فقط. للاستخدام مرة واحدة فقط. لا يمكن دمجها مع عروض أخرى.",
+        height=110,
+        help="Arabic text will be formatted right-to-left in the PDF. Keep NotoKufiArabic-Regular.ttf beside app.py."
     )
     lucky_draw_text = st.text_input("Lucky Draw Heading", value="LUCKY DRAW WINNER — SPECIAL OFFER")
     submitted = st.form_submit_button("Update Coupon Preview")
@@ -69,7 +96,7 @@ if submitted or "coupon_data" not in st.session_state:
         "valid_until": valid_until if submitted else today + timedelta(days=3),
         "discount_text": (discount_text.strip() or "SPECIAL OFFER") if submitted else "50% OFF",
         "eligible_services": eligible_services if submitted else ["CAR WASH", "OIL CHANGE"],
-        "terms": terms.strip() if submitted else "Valid for the named customer and vehicle. One-time use only. Cannot be combined with other offers.",
+        "terms": terms.strip() if submitted else "صالحة للعميل والمركبة المذكورين فقط. للاستخدام مرة واحدة فقط. لا يمكن دمجها مع عروض أخرى.",
         "lucky_draw_text": lucky_draw_text.strip() if submitted else "LUCKY DRAW WINNER — SPECIAL OFFER",
     }
 
@@ -110,7 +137,9 @@ st.markdown(f"""
     <b>Issue Date:</b> {data['issue_date'].strftime('%d %B %Y')}<br>
     <b>Valid Until:</b> {data['valid_until'].strftime('%d %B %Y')}<br>
     <b>Eligible Services:</b> {esc(services_text)}<br>
-    <small><b>Terms &amp; Conditions:</b> {esc(data['terms'])}</small>
+    <div style="margin-top:8px; font-size:12px; text-align:{'right' if contains_arabic(data['terms']) else 'left'}; direction:{'rtl' if contains_arabic(data['terms']) else 'ltr'};">
+      <b>{'الشروط والأحكام' if contains_arabic(data['terms']) else 'Terms &amp; Conditions'}:</b> {esc(data['terms'])}
+    </div>
   </div>
 </div>
 """, unsafe_allow_html=True)
@@ -178,23 +207,45 @@ def create_pdf(coupon, image_file):
         y -= 25
 
     y -= 5
+    terms_text = coupon["terms"] or "No additional terms."
+    is_arabic_terms = contains_arabic(terms_text)
+    terms_label = "الشروط والأحكام:" if is_arabic_terms else "Terms & Conditions:"
     pdf.setFillColor(HexColor("#555555"))
-    pdf.setFont("Helvetica-Bold", 9)
-    pdf.drawString(panel_x + 20, y, "Terms & Conditions:")
+    if is_arabic_terms and ARABIC_FONT_REGISTERED:
+        pdf.setFont("ArabicFont", 9)
+        pdf.drawRightString(panel_x + panel_w - 20, y, prepare_arabic(terms_label))
+    else:
+        pdf.setFont("Helvetica-Bold", 9)
+        pdf.drawString(panel_x + 20, y, terms_label)
     y -= 16
-    pdf.setFont("Helvetica", 8)
-    line = ""
-    for word in (coupon["terms"] or "No additional terms.").split():
-        if len(line + " " + word) > 82:
-            pdf.drawString(panel_x + 20, y, line)
-            y -= 12
-            line = word
-            if y < panel_y + 15:
-                break
+
+    # Wrap terms to the available panel width. Arabic is shaped and right-aligned.
+    font_name = "ArabicFont" if is_arabic_terms and ARABIC_FONT_REGISTERED else "Helvetica"
+    font_size = 8
+    pdf.setFont(font_name, font_size)
+    display_terms = prepare_arabic(terms_text) if is_arabic_terms else terms_text
+    max_line_width = panel_w - 40
+    words = display_terms.split()
+    lines = []
+    current_line = ""
+    for word in words:
+        candidate = (current_line + " " + word).strip()
+        if pdfmetrics.stringWidth(candidate, font_name, font_size) > max_line_width and current_line:
+            lines.append(current_line)
+            current_line = word
         else:
-            line = (line + " " + word).strip()
-    if line and y >= panel_y + 15:
-        pdf.drawString(panel_x + 20, y, line)
+            current_line = candidate
+    if current_line:
+        lines.append(current_line)
+
+    for line in lines:
+        if y < panel_y + 15:
+            break
+        if is_arabic_terms and ARABIC_FONT_REGISTERED:
+            pdf.drawRightString(panel_x + panel_w - 20, y, line)
+        else:
+            pdf.drawString(panel_x + 20, y, line)
+        y -= 12
 
     pdf.setFillColor(BLUE)
     pdf.setFont("Helvetica-Bold", 9)
